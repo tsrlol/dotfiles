@@ -27,7 +27,7 @@ breaks in favor of one of them.
 - **[XDG][xdg]-first, to keep `$HOME` clean.** Config in `~/.config`, caches in
   `~/.cache`, data in `~/.local/share`, state in `~/.local/state`. Tools without
   native XDG support are coaxed into it with environment variables, aliases, or
-  (for ssh, Claude Code, pi, and the skills CLI) a symlink.
+  (for ssh, Claude Code, Codex, pi, and the skills CLI) a symlink.
 - **Current practice over inherited habit.** Prefer the maintained tool and the
   supported auth mechanism; delete config that no longer does anything.
 
@@ -63,7 +63,8 @@ git clone https://github.com/tsroten/dotfiles.git ~/code/dotfiles
    none is committed — pi writes a project-local one into whatever repo it runs
    in, this repo included. `.config/pi/agent/settings.json` and
    `.config/claude/settings.json` are excluded because they are merged rather
-   than copied (steps 6 and 7).
+   than copied (steps 6 and 7). `.codex/` and `.config/codex/` are also excluded:
+   Codex's home is migrated and its global settings patched in step 8.
    This is also what installs the Claude Code subagents: `.config/claude/agents/`
    lands in `~/.config/claude/agents/`, the user-level directory, so they apply
    in every repository. They are generic (`scout`, `implementer`,
@@ -127,7 +128,26 @@ git clone https://github.com/tsroten/dotfiles.git ~/code/dotfiles
    with a warning. Needs `python3`; without it the merge is skipped. Also removes
    the retired `/scratchpad` command if it still matches the repo's old version;
    customized copies are left in place with a warning.
-8. Syncs vim plugins with `:PluginClean! :PluginInstall`. This runs under `vim`
+8. Migrates `~/.codex` to `~/.config/codex` and links `~/.codex` to that directory.
+   An existing real directory is moved intact, including auth, sessions, plugins,
+   and settings, when the destination is absent or an empty real directory. If
+   both locations contain state, the installer warns and skips migration and
+   the settings patch; reconcile them by hand and re-run. Other files or symlinks
+   at `~/.codex` use the same backup behavior as the other links. Shell exports
+   set `CODEX_HOME="$XDG_CONFIG_HOME/codex"`; the link covers other launchers.
+   Patches `~/.config/codex/config.toml` with the permission defaults in this
+   repo's `.config/codex/config.toml`: `workspace-write`, `on-request`, and
+   `auto_review` (the **Approve for me** preset). Existing models, MCP servers,
+   trusted projects, UI settings, and unrelated comments survive. The fragment
+   is authoritative for these three keys on each install. Requires Python 3.11+
+   for TOML validation; failures warn and leave the live file unchanged. Writes
+   are atomic and unchanged files are not rewritten. `.codex/` is excluded from
+   the home sync so project-local config cannot overwrite global config;
+   `.config/codex/` is excluded so migration happens before any destination
+   settings are written. Open a new shell/session after installation to pick up
+   `CODEX_HOME` and the permission defaults. Removing a tracked default does not
+   delete its previously installed value; remove it from the live file by hand.
+9. Syncs vim plugins with `:PluginClean! :PluginInstall`. This runs under `vim`
    when available and falls back to headless `nvim`, because the vimrc's plugin
    list for vim is a superset of neovim's — running `PluginClean!` under neovim
    would delete the vim-only plugins.
@@ -184,6 +204,7 @@ has them.
 | `.config/git/` | `config`, global `ignore`, and a `template/` with ctags hooks. |
 | `.config/alacritty/alacritty.toml` | Terminal: IBM Plex Mono, Nord colors, readline-style Alt-key bindings. |
 | `.config/pi/agent/` | pi: `settings.json` (theme, thinking level, shared extension packages) and the `nord` theme. The settings file is merged into `~` rather than copied, so pi's own state and the machine-local overrides survive; credentials, sessions, and installed extensions live alongside it untracked. |
+| `.config/codex/config.toml` | Permission defaults patched into `~/.config/codex/config.toml` by `install.sh`. Codex's existing home is migrated there and `~/.codex` links to it; other global settings and runtime state stay untracked. |
 | `.config/ssh/config` | Agent/keychain defaults; includes `~/.config/ssh/config.d/*`. |
 | `.config/mysql/`, `.config/mycli/`, `.config/pgcli/` | Database client config. |
 | `.config/python/startup.py` | `PYTHONSTARTUP` hook that puts REPL history under `$XDG_DATA_HOME`. |

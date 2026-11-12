@@ -7,7 +7,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")" || exit
 
 git pull origin main
 
-# .claude/, .agents/, and .pi/ are excluded because they are the link paths the
+# .claude/, .agents/, .pi/, and .codex/ are excluded because they are link paths the
 # linkXdgDir steps below manage. This repo carries its own .claude/ holding the
 # project-local Claude Code settings, and syncing that would recreate ~/.claude
 # as a real directory on every run -- which linkClaudeConfig then refuses to
@@ -21,11 +21,15 @@ git pull origin main
 # this sync installs like any other file. Claude's settings.json, like pi's,
 # is merged below rather than copied. A file deleted here stays installed until
 # removed from ~ by hand, since the sync never uses --delete.
+# .config/codex/ is excluded entirely: linkCodexConfig must migrate existing
+# state before anything writes there, then mergeCodexSettings patches its config.
 doSync() {
   rsync --exclude ".git/" \
     --exclude ".claude/" \
     --exclude ".agents/" \
     --exclude ".pi/" \
+    --exclude ".codex/" \
+    --exclude ".config/codex/" \
     --exclude ".config/pi/agent/settings.json" \
     --exclude ".config/claude/settings.json" \
     --exclude ".DS_Store" \
@@ -130,6 +134,32 @@ linkClaudeConfig() {
   linkXdgDir claude
 }
 
+# Unlike the older link steps, migrate Codex's existing home automatically when
+# there is no destination state to reconcile. doSync excludes .config/codex/
+# entirely so it cannot create/overwrite the destination before this move.
+linkCodexConfig() {
+  local target="$HOME/.config/codex"
+  local link="$HOME/.codex"
+
+  if [ -d "$link" ] && [ ! -L "$link" ]; then
+    # An empty real destination is harmless (including one left by a prior run).
+    # rmdir refuses nonempty directories, including hidden files.
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      if [ -L "$target" ] || ! rmdir "$target" 2>/dev/null; then
+        echo "warning: both $link and $target exist; merge them by hand, then re-run install.sh" >&2
+        return 0
+      fi
+    fi
+    mkdir -p "$HOME/.config"
+    if ! mv "$link" "$target"; then
+      echo "warning: Codex migration failed; settings merge will be skipped" >&2
+      return 0
+    fi
+    echo "Migrated $link -> $target"
+  fi
+  linkXdgDir codex
+}
+
 # Claude has no user-level include or settings.d directory. --settings accepts
 # another file, but only for launches that pass it, at command-line precedence.
 # Merge our fragment into the normal user file so every launcher sees it. Like
@@ -214,6 +244,78 @@ OLD
     echo "Removed retired $command"
   else
     echo "warning: customized $command left in place; remove it manually to retire /scratchpad" >&2
+  fi
+}
+
+# Codex owns the rest of its config (models, MCP servers, trusted projects, UI).
+# Patch only the tracked scalar defaults, preserving the surrounding TOML text.
+# The tracked fragment is excluded from rsync; the live file is patched below.
+mergeCodexSettings() {
+  local live="$HOME/.config/codex/config.toml"
+  local tracked="$PWD/.config/codex/config.toml"
+  local current
+
+  [ -f "$tracked" ] || return 0
+  current=$(readlink "$HOME/.codex" 2>/dev/null || true)
+  if [ "${current%/}" != "$HOME/.config/codex" ]; then
+    echo "warning: Codex home migration unresolved, skipping settings merge" >&2
+    return 0
+  fi
+  if ! hash python3 2>/dev/null; then
+    echo "warning: python3 not found, skipping Codex settings merge" >&2
+    return 0
+  fi
+
+  if python3 - "$live" "$tracked" <<'PY'; then
+import json
+import os
+import re
+import sys
+import tempfile
+import tomllib
+
+live_path, tracked_path = sys.argv[1:]
+with open(tracked_path, "rb") as f:
+    patch = tomllib.load(f)
+if not all(re.fullmatch(r"[a-z_]+", key) and isinstance(value, str)
+           for key, value in patch.items()):
+    raise ValueError("Codex fragment must contain only top-level string settings")
+try:
+    with open(live_path) as f:
+        text = f.read()
+except FileNotFoundError:
+    text = ""
+current = tomllib.loads(text)
+expected = dict(current, **patch)
+if current != expected:
+    # Root assignments must precede tables. Handle ordinary scalar assignments;
+    # semantic validation below refuses unusual syntax rather than risking loss.
+    table = re.search(r"(?m)^[ \t]*\[", text)
+    boundary = table.start() if table else len(text)
+    root, tables = text[:boundary], text[boundary:]
+    for key, value in patch.items():
+        assignment = re.compile(
+            rf"(?m)^[ \t]*(?:{key}|\"{key}\"|'{key}')[ \t]*=[^\n]*(?:\n|$)"
+        )
+        root = assignment.sub("", root)
+    defaults = "".join(f"{key} = {json.dumps(value)}\n" for key, value in patch.items())
+    result = defaults + root + tables
+    if tomllib.loads(result) != expected:
+        raise ValueError("Cannot patch Codex settings without changing unrelated values")
+    directory = os.path.dirname(os.path.abspath(live_path))
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".config-", dir=directory)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(result)
+        os.replace(temporary, live_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+PY
+    echo "Merged Codex settings into $live"
+  else
+    echo "warning: Codex settings merge failed (requires Python 3.11+); $live left as it was" >&2
   fi
 }
 
@@ -355,11 +457,13 @@ if [ "${1:-}" = "--force" ] || [ "${1:-}" = "-f" ]; then
   doSync
   linkSshConfig
   linkClaudeConfig
+  linkCodexConfig
   linkPiConfig
   linkAgentsDir
   mergeClaudeSettings
   removeLegacyScratchpadCommand
   mergePiSettings
+  mergeCodexSettings
   syncVimPlugins
 else
   read -rp "This may overwrite existing files in your home directory. Are you sure? (y/n) "
@@ -368,11 +472,13 @@ else
     doSync
     linkSshConfig
     linkClaudeConfig
+    linkCodexConfig
     linkPiConfig
     linkAgentsDir
     mergeClaudeSettings
     removeLegacyScratchpadCommand
     mergePiSettings
+    mergeCodexSettings
     syncVimPlugins
   fi
 fi

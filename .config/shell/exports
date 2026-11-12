@@ -33,6 +33,8 @@ export PSQLRC="$XDG_CONFIG_HOME/psql/config"
 export PSQL_HISTORY="$XDG_CACHE_HOME/psql/history"
 export PYTHONSTARTUP="$XDG_CONFIG_HOME/python/startup.py"
 export CLAUDE_CONFIG_DIR="$XDG_CONFIG_HOME/claude"
+# install.sh migrates ~/.codex here and links the old path for other launchers.
+export CODEX_HOME="$XDG_CONFIG_HOME/codex"
 # pi keeps its config, credentials, and installed extensions under this one
 # directory. install.sh also links ~/.pi at it, for the processes this export
 # never reaches.
