@@ -61,8 +61,9 @@ git clone https://github.com/tsroten/dotfiles.git ~/code/dotfiles
    as a real directory on every run, blocking the link permanently. The rsync
    copies untracked files as well, which is why `.pi/` is excluded even though
    none is committed — pi writes a project-local one into whatever repo it runs
-   in, this repo included. `.config/pi/agent/settings.json` is excluded for a
-   different reason, explained in step 6: it is merged rather than copied.
+   in, this repo included. `.config/pi/agent/settings.json` and
+   `.config/claude/settings.json` are excluded because they are merged rather
+   than copied (steps 6 and 7).
    This is also what installs the Claude Code subagents: `.config/claude/agents/`
    lands in `~/.config/claude/agents/`, the user-level directory, so they apply
    in every repository. They are generic (`scout`, `implementer`,
@@ -118,7 +119,15 @@ git clone https://github.com/tsroten/dotfiles.git ~/code/dotfiles
    any added later. Applying the result over the live file does replace, so
    dropping a package from either file really removes it. Needs `python3`;
    without it the step warns and leaves the live file alone.
-7. Syncs vim plugins with `:PluginClean! :PluginInstall`. This runs under `vim`
+7. Merges Claude settings from the live `~/.config/claude/settings.json`, the
+   repo's tracked `.config/claude/settings.json`, then optional machine-local
+   `~/.config/claude/settings.local.json`. Objects merge recursively; arrays
+   replace. Unrelated live settings survive. Writes are atomic, unchanged
+   settings are not rewritten, and invalid JSON leaves the live file untouched
+   with a warning. Needs `python3`; without it the merge is skipped. Also removes
+   the retired `/scratchpad` command if it still matches the repo's old version;
+   customized copies are left in place with a warning.
+8. Syncs vim plugins with `:PluginClean! :PluginInstall`. This runs under `vim`
    when available and falls back to headless `nvim`, because the vimrc's plugin
    list for vim is a superset of neovim's — running `PluginClean!` under neovim
    would delete the vim-only plugins.
@@ -202,6 +211,7 @@ these and never gets committed.
 | `~/.config/vim/localrc` | `vim/vimrc`, sourced last |
 | `~/.config/ssh/config.d/*` | `ssh/config` |
 | `~/.config/pi/agent/settings.local.json` | `install.sh` step 6 — merged, not sourced: pi settings only one machine has, currently the `claude-bridge` package and the provider and model that go with it |
+| `~/.config/claude/settings.local.json` | `install.sh` step 7 — optional machine-local overrides merged into Claude's global settings |
 
 All are optional; nothing breaks if they're absent.
 
@@ -211,6 +221,48 @@ by any layer, so the value it last wrote survives in
 `~/.config/pi/agent/settings.json` as though pi had put it there. Packages are
 the exception and do drop out, since the merged array replaces the live one.
 Delete such keys from `~/.config/pi/agent/settings.json` by hand.
+
+Claude's merge has the same limitation: deleting a key from the tracked or
+machine-local fragment does not remove its previously installed value from the
+live settings file. Delete that value by hand when retiring a setting.
+
+## Claude Code status line
+
+`~/.config/claude/statusline.py` combines model and effort, context pressure,
+five-hour and weekly usage percentages with reset countdowns, and a clickable
+`📁 scratchpad` link. For example:
+
+```text
+Opus · high | ctx 42% | 5h 63% ↻ 1h20m | 7d 38% ↻ 3d2h | 📁 scratchpad
+```
+
+Context is green below 70%, yellow from 70%, and red from 90%, using the
+terminal's palette. Each usage percentage means **used**, not remaining. Missing
+fields are omitted, including usage windows before Claude reports them. Reset
+countdowns refresh every 60 seconds even while idle; usage percentages reflect
+the latest data Claude provides. All model, context, and usage information comes
+from Claude's JSON on stdin, with no API calls or transcript parsing.
+
+The scratchpad link appears only when the current session's directory exists.
+The script reads `session_id` from the JSON,
+finds the directory under `/tmp/claude-<uid>/` on macOS (or the system temp
+directory on Linux), and emits an OSC 8 `file://` link. `CLAUDE_CODE_TMPDIR` is
+honored. Paths are URI-encoded, and missing scratchpads omit only the link. The
+script never creates a directory. Clicking requires terminal support for OSC 8
+links; see [Claude's status-line documentation][claude-statusline].
+
+Claude has no documented user-level include or drop-in settings directory.
+[`--settings <file>`][claude-settings] loads a separate file only for that
+launch, above project and user settings in precedence. The installer instead
+patches the normal global file so the setting applies across launchers without
+a wrapper. `~/.claude` links to `~/.config/claude` as described above.
+
+This replaces the old `/scratchpad` slash command. The installer removes its
+unmodified installed copy; if you customized it, remove
+`~/.config/claude/commands/scratchpad.md` manually.
+
+[claude-settings]: https://code.claude.com/docs/en/settings
+[claude-statusline]: https://code.claude.com/docs/en/statusline
 
 ## Shells
 

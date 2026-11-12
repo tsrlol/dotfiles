@@ -1,0 +1,7 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "python3 \"$HOME/.config/claude/statusline.py\"",
+    "refreshInterval": 60
+  }
+}

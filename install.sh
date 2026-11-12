@@ -17,16 +17,17 @@ git pull origin main
 # one. The tracked pi config is at .config/pi/, which is the link target rather
 # than the link path and so syncs normally.
 # ~/.config/claude is otherwise untracked (credentials, history, installed
-# plugins), but .config/claude/agents/ and .config/claude/commands/ are config:
-# the user-level subagent definitions and slash commands, which this sync
-# installs like any other tracked file. A file deleted here stays installed until removed from ~ by hand, since
-# the sync never uses --delete.
+# plugins), but the tracked subagents and status-line script are config, which
+# this sync installs like any other file. Claude's settings.json, like pi's,
+# is merged below rather than copied. A file deleted here stays installed until
+# removed from ~ by hand, since the sync never uses --delete.
 doSync() {
   rsync --exclude ".git/" \
     --exclude ".claude/" \
     --exclude ".agents/" \
     --exclude ".pi/" \
     --exclude ".config/pi/agent/settings.json" \
+    --exclude ".config/claude/settings.json" \
     --exclude ".DS_Store" \
     --exclude "install.sh" \
     --exclude "README.md" \
@@ -127,6 +128,93 @@ linkXdgDir() {
 # looks unauthenticated and logs in to a second store of its own.
 linkClaudeConfig() {
   linkXdgDir claude
+}
+
+# Claude has no user-level include or settings.d directory. --settings accepts
+# another file, but only for launches that pass it, at command-line precedence.
+# Merge our fragment into the normal user file so every launcher sees it. Like
+# mergePiSettings, preserve live keys and allow optional machine-local overrides.
+# Arrays replace here: this is a patch to one file, not Claude's scope merging.
+mergeClaudeSettings() {
+  local live="$HOME/.config/claude/settings.json"
+  local tracked="$PWD/.config/claude/settings.json"
+  local overrides="$HOME/.config/claude/settings.local.json"
+
+  [ -f "$tracked" ] || return 0
+  if ! hash python3 2>/dev/null; then
+    echo "warning: python3 not found, skipping Claude settings merge" >&2
+    return 0
+  fi
+
+  if python3 - "$live" "$tracked" "$overrides" <<'PY'; then
+import json
+import os
+import sys
+import tempfile
+
+live_path, tracked_path, overrides_path = sys.argv[1:]
+
+
+def load(path):
+    try:
+        with open(path) as f:
+            value = json.load(f)
+    except FileNotFoundError:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return value
+
+
+def merge(base, patch):
+    result = dict(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+live = load(live_path)
+result = merge(live, merge(load(tracked_path), load(overrides_path)))
+if result != live or not os.path.exists(live_path):
+    directory = os.path.dirname(live_path)
+    os.makedirs(directory, exist_ok=True)
+    # Same-directory atomic replacement; mkstemp keeps settings private (0600).
+    fd, temporary = tempfile.mkstemp(prefix=".settings-", dir=directory)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(result, f, indent=2)
+            f.write("\n")
+        os.replace(temporary, live_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+PY
+    echo "Merged Claude settings into $live"
+  else
+    echo "warning: Claude settings merge failed, $live left as it was" >&2
+  fi
+}
+
+# Retire only our exact old command; leave any user-customized copy alone.
+removeLegacyScratchpadCommand() {
+  local command="$HOME/.config/claude/commands/scratchpad.md"
+  [ -f "$command" ] || return 0
+  if cmp -s "$command" - <<'OLD'; then
+---
+description: Open this session's scratchpad directory in Finder
+allowed-tools: Bash(open:*), Bash(test:*)
+---
+
+Run `test -d "<dir>" && open "<dir>"`, where `<dir>` is the exact absolute scratchpad directory named in your system prompt. Reply with only that path, or say it does not exist.
+OLD
+    rm "$command"
+    echo "Removed retired $command"
+  else
+    echo "warning: customized $command left in place; remove it manually to retire /scratchpad" >&2
+  fi
 }
 
 # pi has PI_CODING_AGENT_DIR, set in shell/exports, but it is the same deal as
@@ -269,6 +357,8 @@ if [ "${1:-}" = "--force" ] || [ "${1:-}" = "-f" ]; then
   linkClaudeConfig
   linkPiConfig
   linkAgentsDir
+  mergeClaudeSettings
+  removeLegacyScratchpadCommand
   mergePiSettings
   syncVimPlugins
 else
@@ -280,6 +370,8 @@ else
     linkClaudeConfig
     linkPiConfig
     linkAgentsDir
+    mergeClaudeSettings
+    removeLegacyScratchpadCommand
     mergePiSettings
     syncVimPlugins
   fi
