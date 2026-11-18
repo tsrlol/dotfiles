@@ -200,6 +200,7 @@ has them.
 | `.config/bash/exports`, `.config/zsh/exports` | Shell-specific settings only — prompt, history mechanics, keybindings. |
 | `.config/vim/vimrc` | vim/neovim config, Vundle-managed plugins. |
 | `.config/vim/syntax/sql.vim` | Vendored SQL syntax file (see below). |
+| `.config/vim/ale_linters/gdscript/`, `.config/vim/autoload/ale/` | GDScript support for `ale`, which ships none: lint and format-on-save with GDQuest's `gdscript-formatter` (a project's `tools/bin/` copy, else one on `PATH`), plus Godot's language server on `127.0.0.1:6005` while the Godot editor has the project open. |
 | `.config/tmux/` | `tmux.conf`, TPM plugin list, and the `cmus-status` / `mail-count` status-line scripts. |
 | `.config/git/` | `config`, global `ignore`, and a `template/` with ctags hooks. |
 | `.config/alacritty/alacritty.toml` | Terminal: IBM Plex Mono, Nord colors, readline-style Alt-key bindings. |

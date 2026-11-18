@@ -287,6 +287,16 @@ map <leader>gw :Gwrite<CR>
 map <leader>gd :G diff<CR>
 map <leader>gb :G blame<CR>
 
+" GDScript: GDQuest's gdscript-formatter formats on save and lints as you
+" type; Godot's language server adds compiler errors while the editor runs.
+" The linter and fixer live in ale_linters/gdscript/ and autoload/ale/.
+call ale#fix#registry#Add('gdscript_formatter',
+  \ 'ale#fixers#gdscript_formatter#Fix', ['gdscript'],
+  \ 'Format and reorder GDScript with gdscript-formatter')
+let g:ale_fixers = get(g:, 'ale_fixers', {})
+let g:ale_fixers.gdscript = ['gdscript_formatter']
+autocmd FileType gdscript let b:ale_fix_on_save = 1
+
 let localrc=expand("$XDG_CONFIG_HOME/vim/localrc")
 if filereadable(localrc)
   exec "source " . localrc
